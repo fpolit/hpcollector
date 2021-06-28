@@ -1,5 +1,5 @@
 ## HPCollector
-HPCollector is a collector of information of an HPC cluster (`performed jobs`, `partitions`, `nodes`, ...) and save these information in a distributed database.
+HPCollector collect information of an HPC cluster (`performed jobs`, `partitions`, `nodes`, ...) and save them in a distributed database.
 
 ### Dependencies
 * Cassandra
