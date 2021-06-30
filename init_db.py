@@ -5,7 +5,11 @@
 # Maintainer: glozanoa <glozanoa@uni.pe>
 
 import argparse
+from getpass import getpass
+
+# THESE IMPORTS NEED OF cassandra-driver PYTHON PACKAGE
 from cassandra.cluster import Cluster
+from cassandra.auth import PlainTextAuthProvider
 
 types_definition = {
     "partition": 
@@ -83,23 +87,32 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    cluster = None
     try:
         print(f"Connecting to Cassanda server (keyspace:{args.keyspace})")
-        
-        cluster = Cluster()
+        password = getpass(prompt=f"Password for {args.user} role: ")
+
+        auth_provider = PlainTextAuthProvider(username=args.user, password=password)
+        cluster = Cluster(auth_provider=auth_provider)
         session = cluster.connect(args.keyspace)
+
+        #import pdb; pdb.set_trace()
+
+        print(f"[+] Creating user define types in {args.keyspace} keyspace")
+
+        for type, cmd in types_definition.items():
+            print(f"[*] Creating {type} type")
+            session.execute(cmd)
+        
+        print(f"[+] Creating tables in {args.keyspace} keyspace")
+
+        for table, cmd in tables_definition.items():
+            print(f"[*] Creating {table} table")
+            session.execute(cmd)
+
     except Exception as error:
+        if cluster:
+            cluster.shutdown()
+            
         print(error)
         exit(1)
-
-    print(f"[+] Creating user define types in {args.keyspace} keyspace")
-
-    for type, cmd in types_definition.items():
-        print(f"[*] Creating {type} type")
-        session.execute(cmd)
-    
-    print(f"[+] Creating tables in {args.keyspace} keyspace")
-
-    for table, cmd in tables_definition.items():
-        print(f"[*] Creating {table} table")
-        session.execute(cmd)
