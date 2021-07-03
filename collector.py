@@ -43,7 +43,6 @@ def nodes_collector(cluster:Cluster, keyspace:str, n:int = 10, verbose:bool = Fa
         update_statement = session.prepare(f"UPDATE {keyspace}.nodes SET info=? WHERE name=?")
 
         nodes_ids = set(row.name for row in session.execute(f"SELECT name FROM {keyspace}.nodes"))
-
         time.sleep(2)
         #import pdb; pdb.set_trace()
 
@@ -115,6 +114,7 @@ def partitions_collector(cluster:Cluster, keyspace:str, n:int = 10, verbose:bool
 
         partitions_ids = set(row.name for row in session.execute(f"SELECT name FROM {keyspace}.partitions"))
         time.sleep(5)
+        #import pdb; pdb.set_trace()
         while True:
             update_partitions_ids = set(partitions.ids())
             
@@ -146,10 +146,11 @@ def partitions_collector(cluster:Cluster, keyspace:str, n:int = 10, verbose:bool
                     logging.info(f"Unable to get information of partition {partition_id}")
 
                 if Partition.was_changed(partition_id, partition_details, session, keyspace):
+                    #import pdb; pdb.set_trace()
                     logging.info(f"Configuration of partition {partition_id} was changed")
                     logging.info(f"Updating data of partition {partition_id}")
                     updated_partition = Partition(**partition_details)
-                    session.execute(insert_statement, [updated_partition, partition_id])
+                    session.execute(update_statement, [updated_partition, partition_id])
 
             if verbose:
                 logging.info(f"Defined partitions: {update_partitions_ids}")
@@ -160,72 +161,75 @@ def partitions_collector(cluster:Cluster, keyspace:str, n:int = 10, verbose:bool
     except KeyboardInterrupt:
         logging.info("Stop collecting information of partitions.")
 
-def job_collector(cluster:Cluster, keyspace:str, n:int = 1, verbose:bool = False):
+
+def jobs_collector(cluster:Cluster, keyspace:str, n:int = 1, verbose:bool = False):
     """
     Collect information of jobs submitted in a cluster with a frequency n
     """
     #import pdb; pdb.set_trace()
-    try:
+    #try:
 
-        session = cluster.connect(keyspace)
-        cluster.register_user_type(keyspace, 'job', Job)
+    session = cluster.connect(keyspace)
+    cluster.register_user_type(keyspace, 'job', Job)
+    
+    insert_statement = session.prepare(f"INSERT INTO {keyspace}.jobs (job_id, info) VALUES (?, ?)")
+    update_statement = session.prepare(f"UPDATE {keyspace}.jobs SET info=? WHERE job_id=?")
+
+    jobs = pyslurm.job()
+
+    job_ids = set(row.job_id for row in session.execute(f"SELECT job_id FROM {keyspace}.jobs"))
+    #import pdb; pdb.set_trace()
+    while True:
+        updated_job_ids = set(jobs.ids())
         
-        insert_statement = session.prepare(f"INSERT INTO {keyspace}.jobs (job_id, info) VALUES (?, ?)")
-        update_statement = session.prepare(f"UPDATE {keyspace}.jobs SET info=? WHERE job_id=?")
+        if verbose:
+            logging.info("Checking for new submitted jobs")
 
-        jobs = pyslurm.job()
+        # new jobs was submmited
+        for new_job_id in updated_job_ids - job_ids:
+            try:
+                job_data = jobs.find_id(new_job_id)[0]
 
-        job_ids = set(row.job_id for row in session.execute(f"SELECT job_id FROM {keyspace}.jobs"))
-        while True:
+            except Exception as error:
+                logging.error(error)
+                logging.info(f"Unable to get information of job {new_job_id}")
+                continue
+
+            new_job = Job(**job_data)
+            logging.info(f"New job was summited: {new_job}")
+            logging.info(f"Collecting data of job {new_job_id}")
             #import pdb; pdb.set_trace()
-            updated_job_ids = set(jobs.ids())
-            
-            if verbose:
-                logging.info("Checking for new submitted jobs")
+            session.execute(insert_statement, [new_job_id, new_job])
 
-            # new jobs was submmited
-            for new_job_id in updated_job_ids - job_ids:
-                try:
-                    job_data = jobs.find_id(new_job_id)[0]
-                    #logging.info(f"job data: {job_data}")
-                except Exception as error:
-                    logging.error(error)
-                    logging.info(f"Unable to get information of job {new_job_id}")
-                    continue
+        if verbose:
+            logging.info("Checking if any job was updated")
 
-                new_job = Job(**job_data)
-                logging.info(f"New job was summited: {new_job}")
-                logging.info(f"Collecting data of job {new_job_id}")
-                session.execute(insert_statement, [new_job_id, new_job])
+        # check if data of old job was changed
+        for job_id in job_ids:
+            try:
+                job_data = jobs.find_id(job_id)[0]
 
-            if verbose:
-                logging.info("Checking if any job was updated")
+            except Exception as error:
+                logging.error(error)
+                logging.info(f"Unable to get information of job {job_id}")
+                continue
 
-            # check if data of old job was changed
-            for job_id in job_ids:
-                try:
-                    job_data = jobs.find_id(job_id)[0]
-                    #logging.info(f"job data: {job_data}")
-                except Exception as error:
-                    logging.error(error)
-                    logging.info(f"Unable to get information of job {job_id}")
-                    continue
+            if Job.was_changed(job_id, job_data, session, keyspace): #check if data of old job was changed
+                #import pdb; pdb.set_trace()
+                logging.info(f"Job {job_id} was updated")
+                logging.info(f"Updating data of job {job_id}")
+                updated_job = Job(**job_data)
+                session.execute(update_statement, [updated_job, job_id])
 
-                if Job.was_changed(job_id, job_data, session, keyspace): #check if data of old job was changed
-                    logging.info(f"Job {job_id} was modified")
-                    logging.info(f"Updating data of job {job_id}")
-                    updated_job = Job(**job_data)
-                    session.execute(update_statement, [updated_job, job_id])
+        if verbose:
+            logging.info(f"Submitted jobs: {updated_job_ids}")
 
-            if verbose:
-                logging.info(f"Submitted jobs: {updated_job_ids}")
+        job_ids = updated_job_ids
+        time.sleep(n)
 
-            job_ids = updated_job_ids
-            time.sleep(n)
-
-    except Exception as error:
-        logging.error(error)
-        logging.info("Stop collecting information of jobs.")
+    # except Exception as error:
+    #     logging.error(error)
+    #     logging.info("Stop collecting information of jobs.")
 
 
 if __name__=="__main__":
@@ -260,8 +264,8 @@ if __name__=="__main__":
 
     collector = []
     try:
-        #nodes_collector(cluster, args.keyspace, 1, args.verbose)
-        collector_func = [nodes_collector, partitions_collector, job_collector]
+        #jobs_collector(cluster, args.keyspace, 1, args.verbose)
+        collector_func = [nodes_collector, partitions_collector, jobs_collector]
         collector_args = [(cluster, args.keyspace, fc, args.verbose) for fc in args.freq]
 
         for func, args in zip(collector_func, collector_args):
