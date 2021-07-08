@@ -16,6 +16,8 @@ class Node:
         "reason_time"
     ]
 
+    __name__='Node'
+
     def __init__(self, name:str, state:str, partitions :List[str], **kwargs) -> None:
         self.name = name
         self.state = state

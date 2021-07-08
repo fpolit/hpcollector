@@ -40,6 +40,9 @@ class Job:
         "cpus_alloc_layout" # reason: map<text, Any>
     ]
 
+    __name__='Job'
+
+
     def __init__(self, job_id:int, name:str, job_state:str, partition:str, command:str,
                 dependency:List[int] = None, **kwargs) -> None:
         self.job_id = job_id

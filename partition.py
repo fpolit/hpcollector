@@ -19,6 +19,9 @@ class Partition:
         "qos_char",
     ]
 
+    __name__='Partition'
+
+
     def __init__(self, name:str, nodes :str, state:str, **kwargs) -> None:
         self.name = name
         self.state = state
