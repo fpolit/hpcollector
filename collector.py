@@ -12,13 +12,17 @@ import logging
 from getpass import getpass
 
 # THESE IMPORTS NEED OF cassandra-driver PYTHON PACKAGE
-from cassandra.cluster import Cluster
+from cassandra.cqlengine import connection
+from cassandra.cqlengine.management import sync_table
 from cassandra.auth import PlainTextAuthProvider
 
-# importing UDTs (user defined types)
-from node import Node
-from partition import Partition
-from job import Job
+# importing tables
+from tables import (
+    Jobs,
+    Partitions,
+    Nodes
+)
+
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s - %(message)s')
 
@@ -29,22 +33,17 @@ except ModuleNotFoundError as error:
     exit(1)
 
 
-def nodes_collector(cluster:Cluster, keyspace:str, n:int = 10, verbose:bool = False):
+def nodes_collector(keyspace:str, n:int = 10, verbose:bool = False):
     """
     Collect information of nodes of a cluster with a frequency n
     """
-    # try:
+    import pdb; pdb.set_trace()
     nodes = pyslurm.node()
 
-    session = cluster.connect(keyspace)
-    cluster.register_user_type(keyspace, 'node', Node)
-    
-    insert_statement = session.prepare(f"INSERT INTO {keyspace}.nodes (name, info) VALUES (?, ?)")
-    update_statement = session.prepare(f"UPDATE {keyspace}.nodes SET info=? WHERE name=?")
+    sync_table(Nodes, [keyspace])
+    nodes_ids = set(node.name for node in Nodes.objects.all())
 
-    nodes_ids = set(row.name for row in session.execute(f"SELECT name FROM {keyspace}.nodes"))
     time.sleep(2)
-    #import pdb; pdb.set_trace()
 
     while True:
         update_nodes_ids = set(nodes.ids())
@@ -55,37 +54,48 @@ def nodes_collector(cluster:Cluster, keyspace:str, n:int = 10, verbose:bool = Fa
         #new nodes was found
         for node_id in update_nodes_ids - nodes_ids:
             try:
-                node_details  = nodes.find_id(node_id)
+                node_data  = nodes.find_id(node_id)
 
             except Exception as error:
                 logging.error(error)
                 logging.info(f"Unable to get information of node {node_id}")
                 continue
 
-            node = Node(**node_details)
-            logging.info(f"New node was found: {node}")
+            purged_data = Nodes.purge_args(**node_data)
+            logging.info(f"New node was found {node_id}")
             logging.info(f"Collecting data of node {node_id}")
-            session.execute(insert_statement, [node_id, node])
+            new_node = Nodes.create(**purged_data)
 
-        
+            if verbose:
+                logging.info(f"Node data: {purged_data}")
+
+
         if verbose:
             logging.info("Checking if any node was updated")
 
         # check if a node was changed
         for node_id in nodes_ids:
             try:
-                node_details  = nodes.find_id(node_id)
+                node_data  = nodes.find_id(node_id)
 
             except Exception as error:
                 logging.error(error)
                 logging.info(f"Unable to get information of node {node_id}")
                 continue
             
-            if Node.was_changed(node_id, node_details, session, keyspace):
-                logging.info(f"Configuration of node {node_id} was changed")
+            purged_data = Nodes.purge_args(**node_data)
+            old_node_model = Nodes.objects.filter(name = node_id)
+            old_node = old_node_model.get()
+            updated_node = Nodes(**purged_data)
+
+
+            if old_node != updated_node: #check if data of old job was changed
+                #import pdb; pdb.set_trace()
+                updated_cols = Nodes.updated_columns(old_node, updated_node)
+                logging.info(f"Node {node_id} was updated")
                 logging.info(f"Updating data of node {node_id}")
-                updated_node = Node(**node_details)
-                session.execute(update_statement, [updated_node, node_id])
+                
+                old_node_model.update(**updated_cols)
 
 
         if verbose:
@@ -98,21 +108,16 @@ def nodes_collector(cluster:Cluster, keyspace:str, n:int = 10, verbose:bool = Fa
     #     logging.info("Stop collecting information of nodes.")
 
 
-def partitions_collector(cluster:Cluster, keyspace:str, n:int = 10, verbose:bool = False):
+def partitions_collector(keyspace:str, n:int = 10, verbose:bool = False):
     """
     Collect information of partitions of a cluster with a frequency n
     """
-    # try:
     #import pdb; pdb.set_trace()
     partitions = pyslurm.partition()
 
-    session = cluster.connect(keyspace)
-    cluster.register_user_type(keyspace, 'partition', Partition)
-    
-    insert_statement = session.prepare(f"INSERT INTO {keyspace}.partitions (name, info) VALUES (?, ?)")
-    update_statement = session.prepare(f"UPDATE {keyspace}.partitions SET info=? WHERE name=?")
+    sync_table(Partitions, [keyspace])
+    partitions_ids = set(partition.name for partition in Partitions.objects.all())
 
-    partitions_ids = set(row.name for row in session.execute(f"SELECT name FROM {keyspace}.partitions"))
     time.sleep(5)
     #import pdb; pdb.set_trace()
     while True:
@@ -124,33 +129,44 @@ def partitions_collector(cluster:Cluster, keyspace:str, n:int = 10, verbose:bool
         #new partition was created
         for partition_id in update_partitions_ids - partitions_ids:
             try:
-                partition_details  = partitions.find_id(partition_id)
+                partition_data  = partitions.find_id(partition_id)
             except Exception as error:
                 logging.error(error)
                 logging.info(f"Unable to get information of partition {partition_id}")
-
-            partition = Partition(**partition_details)
-            logging.info(f"New partition was found: {partition}")
+            
+            purged_data = Partitions.purge_args(**partition_data)
+            logging.info(f"New partition was found {partitions_id}")
             logging.info(f"Collecting data of partition {partition_id}")
-            session.execute(insert_statement, [partition_id, partition])
-    
+            new_partition = Partitions.create(**purged_data)
+            
+            if verbose:
+                logging.info(f"Partition data: {purged_data}")
+
+
         if verbose:
             logging.info("Checking if any partition was updated")
 
         # check if a partition was changed
         for partition_id in partitions_ids:
             try:
-                partition_details  = partitions.find_id(partition_id)
+                partition_data  = partitions.find_id(partition_id)
             except Exception as error:
                 logging.error(error)
                 logging.info(f"Unable to get information of partition {partition_id}")
 
-            if Partition.was_changed(partition_id, partition_details, session, keyspace):
+            purged_data = Partitions.purge_args(**partition_data)
+            old_partition_model = Partitions.objects.filter(name = partition_id)
+            old_partition = old_partition_model.get()
+            updated_partition = Partitions(**purged_data)
+
+
+            if old_partition != updated_partition: #check if data of old job was changed
                 #import pdb; pdb.set_trace()
-                logging.info(f"Configuration of partition {partition_id} was changed")
+                updated_cols = Jobs.updated_columns(old_job, updated_job)
+                logging.info(f"Partition {partition_id} was updated")
                 logging.info(f"Updating data of partition {partition_id}")
-                updated_partition = Partition(**partition_details)
-                session.execute(update_statement, [updated_partition, partition_id])
+                
+                old_partition_model.update(**updated_cols)
 
         if verbose:
             logging.info(f"Defined partitions: {update_partitions_ids}")
@@ -162,23 +178,16 @@ def partitions_collector(cluster:Cluster, keyspace:str, n:int = 10, verbose:bool
     #     logging.info("Stop collecting information of partitions.")
 
 
-def jobs_collector(cluster:Cluster, keyspace:str, n:int = 1, verbose:bool = False):
+def jobs_collector(keyspace:str, n:int = 1, verbose:bool = False):
     """
     Collect information of jobs submitted in a cluster with a frequency n
     """
     #import pdb; pdb.set_trace()
-    #try:
-
-    session = cluster.connect(keyspace)
-    cluster.register_user_type(keyspace, 'job', Job)
-    
-    insert_statement = session.prepare(f"INSERT INTO {keyspace}.jobs (job_id, info) VALUES (?, ?)")
-    update_statement = session.prepare(f"UPDATE {keyspace}.jobs SET info=? WHERE job_id=?")
+    sync_table(Jobs, [keyspace])
 
     jobs = pyslurm.job()
 
-    job_ids = set(row.job_id for row in session.execute(f"SELECT job_id FROM {keyspace}.jobs"))
-    #import pdb; pdb.set_trace()
+    job_ids = set(job.job_id for job in Jobs.objects.all())
     while True:
         updated_job_ids = set(jobs.ids())
         
@@ -195,11 +204,15 @@ def jobs_collector(cluster:Cluster, keyspace:str, n:int = 1, verbose:bool = Fals
                 logging.info(f"Unable to get information of job {new_job_id}")
                 continue
 
-            new_job = Job(**job_data)
-            logging.info(f"New job was summited: {new_job}")
+            purged_data = Jobs.purge_args(**job_data)
+            logging.info(f"New job was summited: {new_job_id}")
             logging.info(f"Collecting data of job {new_job_id}")
-            #import pdb; pdb.set_trace()
-            session.execute(insert_statement, [new_job_id, new_job])
+            new_job = Jobs.create(**purged_data)
+
+            if verbose:
+                logging.info(f"Job data: {purged_data}")
+
+            
 
         if verbose:
             logging.info("Checking if any job was updated")
@@ -214,12 +227,19 @@ def jobs_collector(cluster:Cluster, keyspace:str, n:int = 1, verbose:bool = Fals
                 logging.info(f"Unable to get information of job {job_id}")
                 continue
 
-            if Job.was_changed(job_id, job_data, session, keyspace): #check if data of old job was changed
+            purged_data = Jobs.purge_args(**job_data)
+            old_job_model = Jobs.objects.filter(job_id = job_id)
+            old_job = old_job_model.get()
+            updated_job = Jobs(**purged_data)
+
+
+            if old_job != updated_job: #check if data of old job was changed
                 #import pdb; pdb.set_trace()
+                updated_cols = Jobs.updated_columns(old_job, updated_job)
                 logging.info(f"Job {job_id} was updated")
                 logging.info(f"Updating data of job {job_id}")
-                updated_job = Job(**job_data)
-                session.execute(update_statement, [updated_job, job_id])
+                
+                old_job_model.update(**updated_cols)
 
         if verbose:
             logging.info(f"Submitted jobs: {updated_job_ids}")
@@ -236,7 +256,8 @@ if __name__=="__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-u', '--user', required=True, help='Role of cassandra DB')
     parser.add_argument('-k', '--keyspace', required=True, help='Cassandra keyspace')
-    parser.add_argument('--host', default="127.0.0.1", help='Hostname or IP4 of cassandra DB server')
+    parser.add_argument('--hosts', default=["127.0.0.1"], nargs='+', 
+                        help='Hostname or IP4 of cassandra DB server')
     parser.add_argument('-v', '--verbose', action='store_true', 
                         help='Show collected data')
     parser.add_argument('-f', '--freq', nargs=3, default=[10, 10, 1],
@@ -245,7 +266,6 @@ if __name__=="__main__":
     args = parser.parse_args()
 
     auth_provider = None
-    cluster = None
     try:
         print(f"Connecting to Cassanda server (keyspace:{args.keyspace})")
         password = getpass(prompt=f"Password for {args.user} role: ")
@@ -253,34 +273,34 @@ if __name__=="__main__":
         auth_provider = PlainTextAuthProvider(username=args.user, password=password)
         del password
 
-        cluster = Cluster(auth_provider=auth_provider)
-        session = cluster.connect(args.keyspace)
+        connection.setup(args.hosts, args.keyspace, protocol_version=3, auth_provider=auth_provider)
+        # cluster = Cluster(auth_provider=auth_provider)
+        # session = cluster.connect(args.keyspace)
     except Exception as error:
         if auth_provider:
             del auth_provider
-        if cluster:
-           cluster.shutdown()
+        print(error)
         exit(1)
 
     collector = []
     try:
-        #jobs_collector(cluster, args.keyspace, 1, args.verbose)
-        collector_func = [nodes_collector, partitions_collector, jobs_collector]
-        collector_args = [(cluster, args.keyspace, fc, args.verbose) for fc in args.freq]
+        nodes_collector(args.keyspace, 1, args.verbose)
+        # collector_func = [nodes_collector, partitions_collector, jobs_collector]
+        # collector_args = [(cluster, args.keyspace, fc, args.verbose) for fc in args.freq]
 
-        for func, args in zip(collector_func, collector_args):
-            collector.append(threading.Thread(target=func, args=args, daemon=True))
+        # for func, args in zip(collector_func, collector_args):
+        #     collector.append(threading.Thread(target=func, args=args, daemon=True))
 
-        logging.info("Start collecting information")
-        for thread_collector in collector:
-            thread_collector.start()
+        # logging.info("Start collecting information")
+        # for thread_collector in collector:
+        #     thread_collector.start()
 
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            logging.info("Stop collecting information.")
-            exit(0)
+        # try:
+        #     while True:
+        #         time.sleep(1)
+        # except KeyboardInterrupt:
+        #     logging.info("Stop collecting information.")
+        #     exit(0)
 
 
     except Exception as error:
