@@ -12,20 +12,24 @@ import json
 
 # THESE IMPORTS NEED OF cassandra-driver PYTHON PACKAGE
 from cassandra.cluster import Cluster
+from cassandra.cqlengine import connection
+from cassandra.cqlengine.management import sync_table
 from cassandra.auth import PlainTextAuthProvider
 from cassandra.util import OrderedMapSerializedKey
 
-
-# importing UDTs (user defined types)
-from node import Node
-from partition import Partition
-from job import Job
+# importing tables
+from tables import (
+    Jobs,
+    Partitions,
+    Nodes
+)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-u', '--user', help='Role of cassandra DB')
     parser.add_argument('-k', '--keyspace', help='Cassandra keyspace')
-    parser.add_argument('--host', help='Hostname or IP4 of cassandra DB server')
+    parser.add_argument('--hosts', default=["127.0.0.1"], nargs='+', 
+                    help='Hostname or IP4 of cassandra DB server')
     parser.add_argument('--load', action='store_true', help="Load data of json file to keyspace's tables")
     parser.add_argument('data', help="Json file to backup keyspace or to load data to keyspace's tables")
 
@@ -45,42 +49,30 @@ if __name__ == "__main__":
 
             keyspace_data = {}
             for table in tables:
-                #import pdb; pdb.set_trace()
+                import pdb; pdb.set_trace()
                 print(f"[*] Performing a backup to {table} table")
-                keyspace_data[table] = {}
+                keyspace_data[table] = []
                 rows = session.execute(f"select * from {args.keyspace}.{table}")
-                for key, info in rows:
-                    info_dict = dict(info._asdict())
-                    for info_key ,value in info_dict.items():
+                for row in rows:
+                    #print(f"row: {row}")
+                    row2dict = {}
+                    for key, value in row._asdict().items():
                         if isinstance(value, OrderedMapSerializedKey):
-                            info_dict[info_key] = dict(value)
-                    
-                    keyspace_data[table][key] = info_dict
-
+                            value = dict(value)      
+                        row2dict[key] = value
+                    keyspace_data[table].append(row2dict)
 
             with open(args.data, 'w') as data_file:
-                json.dump(keyspace_data, data_file, indent=4)            
+               json.dump(keyspace_data, data_file, indent=4)            
 
             print(f"[+] Backup was saved to {args.data}")
 
         else:
 
-            tables_structs = {
-                "partitions": {
-                    'columns': ['name', 'info'],
-                    'udt': Partition,
-                    'pk_type': str,
-                },
-                "nodes": {
-                    'columns': ['name', 'info'],
-                    'udt': Node,
-                    'pk_type': str,
-                },
-                "jobs": {
-                    'columns': ['job_id', 'info'],
-                    'udt': Job,
-                    'pk_type': int,
-                }
+            tables = {
+                "partitions": Partitions,
+                "nodes": Nodes,
+                "jobs": Jobs
             }
 
             keyspace_data = None
@@ -88,18 +80,20 @@ if __name__ == "__main__":
                 keyspace_data = json.load(data_file)
 
             if keyspace_data:
+                connection.setup(args.hosts, args.keyspace, protocol_version=3, auth_provider=auth_provider)
+
                 for table_name, rows in keyspace_data.items():
                     #import pdb; pdb.set_trace()
                     print(f"[*] Inserting {len(rows)} rows in {table_name} table")
 
-                    pk, info = tables_structs[table_name]['columns']
-                    pk_type = tables_structs[table_name]['pk_type']
-                    udt = tables_structs[table_name]['udt']
-                    cluster.register_user_type(args.keyspace, udt.__name__.lower(), udt)
-                    insert_statement = session.prepare(f"INSERT INTO {args.keyspace}.{table_name} ({pk}, {info}) VALUES (?, ?)")
+                    model = tables[table_name]
+                    sync_table(model)
 
-                    for pk, info in rows.items(): # pk: Primary key
-                        session.execute(insert_statement, [pk_type(pk), udt(**info)])
+                    for data in rows: 
+                        purged_data = model.purge_args(**data)
+                        model.create(**purged_data)
+
+                print("[+] The data of file {args.data} was successfully loaded in {args.keyspace} keyspace")
 
             else:
                 raise Exception("Failed to read backup file")
