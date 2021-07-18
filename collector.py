@@ -37,7 +37,7 @@ def nodes_collector(keyspace:str, n:int = 10, verbose:bool = False):
     """
     Collect information of nodes of a cluster with a frequency n
     """
-    import pdb; pdb.set_trace()
+    #import pdb; pdb.set_trace()
     nodes = pyslurm.node()
 
     sync_table(Nodes, [keyspace])
@@ -97,6 +97,9 @@ def nodes_collector(keyspace:str, n:int = 10, verbose:bool = False):
                 
                 old_node_model.update(**updated_cols)
 
+                if verbose:
+                    logging.info(f"Updated data: {updated_cols}")
+
 
         if verbose:
             logging.info(f"Defined nodes: {update_nodes_ids}")
@@ -135,10 +138,10 @@ def partitions_collector(keyspace:str, n:int = 10, verbose:bool = False):
                 logging.info(f"Unable to get information of partition {partition_id}")
             
             purged_data = Partitions.purge_args(**partition_data)
-            logging.info(f"New partition was found {partitions_id}")
+            logging.info(f"New partition was found {partition_id}")
             logging.info(f"Collecting data of partition {partition_id}")
             new_partition = Partitions.create(**purged_data)
-            
+
             if verbose:
                 logging.info(f"Partition data: {purged_data}")
 
@@ -167,6 +170,10 @@ def partitions_collector(keyspace:str, n:int = 10, verbose:bool = False):
                 logging.info(f"Updating data of partition {partition_id}")
                 
                 old_partition_model.update(**updated_cols)
+
+                if verbose:
+                    logging.info(f"Updated data: {updated_cols}")
+
 
         if verbose:
             logging.info(f"Defined partitions: {update_partitions_ids}")
@@ -207,10 +214,11 @@ def jobs_collector(keyspace:str, n:int = 1, verbose:bool = False):
             purged_data = Jobs.purge_args(**job_data)
             logging.info(f"New job was summited: {new_job_id}")
             logging.info(f"Collecting data of job {new_job_id}")
-            new_job = Jobs.create(**purged_data)
 
             if verbose:
                 logging.info(f"Job data: {purged_data}")
+
+            new_job = Jobs.create(**purged_data)
 
             
 
@@ -284,20 +292,21 @@ if __name__=="__main__":
 
     collector = []
     try:
-        nodes_collector(args.keyspace, 1, args.verbose)
+        jobs_collector(args.keyspace, 1, args.verbose)
         # collector_func = [nodes_collector, partitions_collector, jobs_collector]
-        # collector_args = [(cluster, args.keyspace, fc, args.verbose) for fc in args.freq]
+        # collector_args = [(args.keyspace, fc, args.verbose) for fc in args.freq]
 
         # for func, args in zip(collector_func, collector_args):
-        #     collector.append(threading.Thread(target=func, args=args, daemon=True))
+        #     collector.append(threading.Thread(target=func, args=args, name=func.__name__, daemon=True))
 
         # logging.info("Start collecting information")
         # for thread_collector in collector:
+        #     logging.info(f"Start {thread_collector.name} thread")
         #     thread_collector.start()
 
         # try:
         #     while True:
-        #         time.sleep(1)
+        #         time.sleep(0.1)
         # except KeyboardInterrupt:
         #     logging.info("Stop collecting information.")
         #     exit(0)

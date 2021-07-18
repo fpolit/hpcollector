@@ -52,8 +52,8 @@ class Jobs(Model):
     alloc_sid               = Integer()
     assoc_id                = Integer()
     batch_flag              = Integer()
-    billable_tres           = Integer()
-    bitflags                = BigInt()
+    billable_tres           = Text()
+    bitflags                = Text()
     boards_per_node         = Integer()
     comment                 = Text()
     contiguous              = Boolean()
@@ -90,7 +90,7 @@ class Jobs(Model):
     pn_min_tmp_disk         = Integer()
     power_flags             = Integer()
     priority                = Text()
-    profile                 = Integer()
+    profile                 = Text()
     reboot                  = Integer()
     req_nodes               = List(value_type=Text())
     req_switch              = Integer()
@@ -126,7 +126,7 @@ class Jobs(Model):
         purged_args = {}
         for name, value in kwargs.items():
             if name in cols:
-                if name in ['time_limit', 'priority']:
+                if name in ['time_limit', 'priority', 'profile', 'billable_tres', 'bitflags']:
                     value = str(value)
                 
                 purged_args[name] = value
